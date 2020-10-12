@@ -1,6 +1,8 @@
 
 
 const client = require('axios').default;
+const kinesis = require('./kinesis');
+
 const datetime = require('node-datetime').create();
 
 datetime.offsetInDays(-1);
@@ -30,29 +32,22 @@ const getAllStations = async () => {
 }
 
 
-const getDailyInfo = async () => {
+const getDailyInfoAndSaveIntoKinesis = async () => {
   const stations = await getAllStations();
   
   const promisses = stations.map( async ({ CD_ESTACAO }) => {
     const dailyUrl = `https://apitempo.inmet.gov.br/estacao/diaria/${pastDay}/${pastDay}/${CD_ESTACAO}`
-    let infos = [];
     try {
       const { data } = await client.get(dailyUrl);
-      infos = data;
+      data.forEach(payload => {
+        kinesis.save(payload);
+      })
     } catch (err) {
       console.log(err.message)
     }
-    return infos;
   })
 
-  let formatedResults = []
-  const response = await Promise.all(promisses);
-
-  response.forEach(arrayOfAStation => {
-    formatedResults = [...formatedResults, ...arrayOfAStation]
-  })
-
-  return formatedResults;
+  await Promise.all(promisses);
 }
 
 
@@ -61,14 +56,14 @@ const successfullResponse = {
   isBase64Encoded: false,
   statusCode: 200,
   headers: { 'Content-Type': 'application/json' },
-  body: []
+  body: {}
 };
 
 
 
 
 exports.handler = async (event, context, callback) => {
-    const allInfos  = await getDailyInfo();
-    successfullResponse.body = allInfos;
+    await getDailyInfoAndSaveIntoKinesis();
+    successfullResponse.body = { message: "Records added  successfully" };
     callback(null, successfullResponse);
 };
