@@ -56,6 +56,41 @@ from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kinesis import KinesisUtils, InitialPositionInStream
 
+
+def get_fahr_from_celsius(temp):
+    return (temp * 9/5) + 32
+
+
+def get_celsius_from_fahr(temp):
+    return (temp - 32) * 5/9
+
+
+def calculate_index(T, RH):
+    # T: Temperature in Fahrenheit
+    # RH: Air Humidity
+
+    HI_S = (1.1 * T) - 10.3 + (0.047 * RH)
+
+    if HI_S < 80:
+        HI = HI_S
+        return HI
+
+    HI_S = -42.379 + (2.04901523 * T) + (10.14333127 * RH) - (0.22475541 * T * RH) - \
+        (6.83783 * 10**-3 * T**2) - (5.481717 * 10**-2 * RH**2) + (1.22874 * 10**-3 * T**2 * RH) + \
+        (8.5282 * 10**-4 * T * RH**2) - (1.99 * 10**-6 * T**-6 * T**2 * RH**2)
+
+    if (80 <= T and T <= 112) and RH <= 13:
+        HI = HI_S - ((3.25 - (0.25 * RH)) * ((17 - abs(T - 95))/17)**0.5)
+        return HI
+
+    if (80 <= T and T <= 87) and RH > 85:
+        HI = HI_S + (0.02 * (RH - 85) * (87 * T))
+        return HI
+
+    HI = HI_S
+    return HI
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 5:
         print(
@@ -74,16 +109,15 @@ if __name__ == "__main__":
 
     lines.pprint()
 
-    def calculate_index(T, RH): 
-        HI = 1.1 * T - 10.3 + 0.047 * RH
-        pass
+    def add_index_to_obj(data: string):
+        station_infos = json.loads(data)
+        T = get_fahr_from_celsius(station_infos.get('TEMP_MED'))
+        RH = station_infos.get("UMID_MED")
 
-    
-    def add_index_to_obj(x: string):
-        station_infos = json.loads(x)
+        index_in_fahr = calculate_index(T, RH)
+        station_infos["HI"] = get_celsius_from_fahr(index_in_fahr)
 
         return json.dumps(station_infos)
-    
 
     parsed_with_index = lines.map(lambda data: add_index_to_obj(data))
     parsed_with_index.pprint()
@@ -93,11 +127,10 @@ if __name__ == "__main__":
         sqs_url = 'https://sqs.us-east-1.amazonaws.com/494824362413/AWS-ElasticMapReduce-j-2KXGR8ZEW2VF'
         message = rdd.collect()
         sqs.send_message(QueueUrl=sqs_url, MessageBody=str(message))
-        
 
-    lines.foreachRDD(lambda rdd: handler(rdd))
+    parsed_with_index.foreachRDD(lambda rdd: handler(rdd))
 
-    lines.pprint()
+    parsed_with_index.pprint()
 
     ssc.start()
     ssc.awaitTermination()
