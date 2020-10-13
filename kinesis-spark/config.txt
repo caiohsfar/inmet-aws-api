@@ -1,0 +1,2 @@
+add  step
+aws emr add-steps --cluster-id j-1R9YRJT6JWNJZ --steps Type=Spark,Name="Spark Inmet",ActionOnFailure=CONTINUE,Args=[--jars,s3://inmet-bucket/elasticsearch-hadoop-6.4.3.jar,--packages,org.apache.spark:spark-streaming-kinesis-asl_2.11:2.4.0,s3://inmet-bucket/kinesis_spark.py,kinesis_spark.py,inmet-stream,https://kinesis.us-east-1.amazonaws.com,us-east-1]
