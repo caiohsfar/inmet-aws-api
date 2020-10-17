@@ -2,7 +2,7 @@
 
 const client = require('axios').default;
 const kinesis = require('./kinesis');
-
+process.env.TZ = 'America/Sao_Paulo'
 const datetime = require('node-datetime').create();
 
 datetime.offsetInDays(-1);
@@ -34,20 +34,31 @@ const getAllStations = async () => {
 
 const getDailyInfoAndSaveIntoKinesis = async () => {
   const stations = await getAllStations();
-  
-  const promisses = stations.map( async ({ CD_ESTACAO }) => {
+
+  const promisses = stations.map(async ({ CD_ESTACAO }) => {
     const dailyUrl = `https://apitempo.inmet.gov.br/estacao/diaria/${pastDay}/${pastDay}/${CD_ESTACAO}`
     try {
       const { data } = await client.get(dailyUrl);
-      data.forEach(payload => {
-        kinesis.save(payload);
-      })
+      const { TEMP_MED, TEMP_MIN, TEMP_MAX, UMID_MED, DT_MEDICAO, DC_NOME } = data[0]
+      const filteredData = {
+        TEMP_MED,
+        TEMP_MIN,
+        TEMP_MAX,
+        UMID_MED,
+        DT_MEDICAO,
+        DC_NOME
+      }
+      const response = { [CD_ESTACAO]: filteredData }
+      kinesis.save(response);
+      return response
     } catch (err) {
       console.log(err.message)
+      return {}
+
     }
   })
 
-  await Promise.all(promisses);
+  return await Promise.all(promisses);
 }
 
 
@@ -61,9 +72,8 @@ const successfullResponse = {
 
 
 
-
 exports.handler = async (event, context, callback) => {
-    await getDailyInfoAndSaveIntoKinesis();
-    successfullResponse.body = { message: "Records added  successfully" };
-    callback(null, successfullResponse);
+  const result = await getDailyInfoAndSaveIntoKinesis();
+  successfullResponse.body = { message: "Records added  successfully", data: result };
+  callback(null, successfullResponse);
 };
