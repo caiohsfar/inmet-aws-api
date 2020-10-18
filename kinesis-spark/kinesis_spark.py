@@ -15,37 +15,6 @@
 # limitations under the License.
 #
 
-"""
-  Consumes messages from a Amazon Kinesis streams and does wordcount.
-  This example spins up 1 Kinesis Receiver per shard for the given stream.
-  It then starts pulling from the last checkpointed sequence number of the given stream.
-  Usage: kinesis_wordcount_asl.py <app-name> <stream-name> <endpoint-url> <region-name>
-    <app-name> is the name of the consumer app, used to track the read data in DynamoDB
-    <stream-name> name of the Kinesis stream (ie. mySparkStream)
-    <endpoint-url> endpoint of the Kinesis service
-      (e.g. https://kinesis.us-east-1.amazonaws.com)
-  Example:
-      # export AWS keys if necessary
-      $ export AWS_ACCESS_KEY_ID=<your-access-key>
-      $ export AWS_SECRET_KEY=<your-secret-key>
-      # run the example
-      $ bin/spark-submit -jars external/kinesis-asl/target/scala-*/\
-        spark-streaming-kinesis-asl-assembly_*.jar \
-        external/kinesis-asl/src/main/python/examples/streaming/kinesis_wordcount_asl.py \
-        myAppName mySparkStream https://kinesis.us-east-1.amazonaws.com
-  There is a companion helper class called KinesisWordProducerASL which puts dummy data
-  onto the Kinesis stream.
-  This code uses the DefaultAWSCredentialsProviderChain to find credentials
-  in the following order:
-      Environment Variables - AWS_ACCESS_KEY_ID and AWS_SECRET_KEY
-      Java System Properties - aws.accessKeyId and aws.secretKey
-      Credential profiles file - default location (~/.aws/credentials) shared by all AWS SDKs
-      Instance profile credentials - delivered through the Amazon EC2 metadata service
-  For more information, see
-      http://docs.aws.amazon.com/AWSSdkDocsJava/latest/DeveloperGuide/credentials.html
-  See http://spark.apache.org/docs/latest/streaming-kinesis-integration.html for more details on
-  the Kinesis Spark Streaming integration.
-"""
 from __future__ import print_function
 
 import sys
@@ -57,9 +26,6 @@ from pyspark.streaming import StreamingContext
 from pyspark.streaming.kinesis import KinesisUtils, InitialPositionInStream
 import requests
 
-#import #logging
-##logging.basicConfig(filename='app.log', level=#logging.INFO)
-##logging.info("App loaded")
 
 def get_fahr_from_celsius(temp):
     return (temp * 9/5) + 32
@@ -138,6 +104,57 @@ def send_data_to_tb(station_key_value):
         #logging.error("ERROR RESPONSE" + str(e))
         print(e)
 
+def get_hi_state(hi):
+        hi = float(hi)
+        if hi <= 27:
+            return "NORMAL"
+        elif hi >= 27.1 and hi <= 32:
+            return "CAUTELA"
+        elif hi >= 32.1 and hi <= 41:
+            return "CAUTELA EXTREMA"
+        elif hi >= 41.1 and hi <= 54:
+            return "PERIGO"
+        elif hi > 54:
+            return "PERIGO EXTREMO"
+        else:
+            return "N/A"
+
+def add_hi_to_obj_and_adjust_values(data):
+    station_infos = json.loads(data)
+    key_station = next(iter(station_infos))
+
+    temp_med = station_infos[key_station]["TEMP_MED"]
+    umid_med = station_infos[key_station]["UMID_MED"]
+
+    temp_min = station_infos[key_station]["TEMP_MIN"]
+    temp_max = station_infos[key_station]["TEMP_MAX"]
+    
+    if temp_med == None:
+        if None not in (temp_min, temp_max):
+            calc_temp_med = (float(temp_max) + float(temp_min))/ 2
+            temp_med = float("{:.2f}".format(calc_temp_med))
+            station_infos[key_station]["TEMP_MED"] = temp_med
+        
+    
+    if None not in (temp_med, umid_med):
+        T = get_fahr_from_celsius(float(temp_med))
+        RH = float(umid_med)
+        index_in_fahr = calculate_index(T, RH)
+        station_infos[key_station]["HI"] = float("{:.2f}".format(get_celsius_from_fahr(index_in_fahr)))
+        station_infos[key_station]["HI_ALERTA"] = get_hi_state(station_infos[key_station]["HI"])
+        
+    else:
+        station_infos[key_station]["HI"] = "N/A"
+        station_infos[key_station]["HI_ALERTA"] = "N/A"
+
+    
+    for (key, value) in station_infos[key_station].items():
+        if value == None:
+            station_infos[key_station][key] = "N/A"
+
+
+    return json.dumps(station_infos)
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 5:
@@ -157,58 +174,6 @@ if __name__ == "__main__":
 
     stream.pprint()
 
-    def get_hi_state(hi):
-        hi = float(hi)
-        if hi <= 27:
-            return "NORMAL"
-        elif hi >= 27.1 and hi <= 32:
-            return "CAUTELA"
-        elif hi >= 32.1 and hi <= 41:
-            return "CAUTELA EXTREMA"
-        elif hi >= 41.1 and hi <= 54:
-            return "PERIGO"
-        elif hi > 54:
-            return "PERIGO EXTREMO"
-        else:
-            return "N/A"
-
-    def add_hi_to_obj_and_adjust_values(data):
-        station_infos = json.loads(data)
-        key_station = next(iter(station_infos))
-
-        station_infos[key_station]
-
-        temp_med = station_infos[key_station]["TEMP_MED"]
-        umid_med = station_infos[key_station]["UMID_MED"]
-
-        temp_min = station_infos[key_station]["TEMP_MIN"]
-        temp_max = station_infos[key_station]["TEMP_MAX"]
-        
-        if temp_med == None:
-            if None not in (temp_min, temp_max):
-                calc_temp_med = (float(temp_max) + float(temp_min))/ 2
-                temp_med = float("{:.2f}".format(calc_temp_med))
-                station_infos[key_station]["TEMP_MED"] = temp_med
-            
-        
-        if None not in (temp_med, umid_med):
-            T = get_fahr_from_celsius(float(temp_med))
-            RH = float(umid_med)
-            index_in_fahr = calculate_index(T, RH)
-            station_infos[key_station]["HI"] = float("{:.2f}".format(get_celsius_from_fahr(index_in_fahr)))
-            station_infos[key_station]["HI_ALERTA"] = get_hi_state(station_infos[key_station]["HI"])
-            
-        else:
-            station_infos[key_station]["HI"] = "N/A"
-            station_infos[key_station]["HI_ALERTA"] = "N/A"
-
-        
-        for (key, value) in station_infos[key_station].items():
-            if value == None:
-                station_infos[key_station][key] = "N/A"
-
-
-        return json.dumps(station_infos)
 
     parsed_with_index = stream.map(lambda data: add_hi_to_obj_and_adjust_values(data))
     parsed_with_index.pprint()
@@ -221,10 +186,7 @@ if __name__ == "__main__":
             send_data_to_tb(json.loads(station))
 
 
-
-
     parsed_with_index.foreachRDD(lambda rdd: handler(rdd))
-
     parsed_with_index.pprint()
 
     ssc.start()
