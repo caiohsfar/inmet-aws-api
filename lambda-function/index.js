@@ -67,13 +67,11 @@ const successfullResponse = {
   isBase64Encoded: false,
   statusCode: 200,
   headers: { 'Content-Type': 'application/json' },
-  body: {}
 };
 
 
 
 exports.handler = async (event, context, callback) => {
-  const result = await getDailyInfoAndSaveIntoKinesis();
-  successfullResponse.body = { message: "Records added  successfully", data: result };
+  await getDailyInfoAndSaveIntoKinesis();
   callback(null, successfullResponse);
 };
